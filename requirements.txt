@@ -2,3 +2,5 @@ torchvision
 torch
 tqdm
 rasterio
+scikit-learn
+seaborn
