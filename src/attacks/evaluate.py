@@ -11,7 +11,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
-
+from src.training.simple_cnn import SimpleCNN
 
 try:
     from src.data.dataloader import EuroSATDataset, compute_mean_std, get_dataloaders
@@ -173,7 +173,9 @@ def evaluate_adv(
     adv_ds = AdvFolderDataset(adv_folder, transform=transform, pattern=image_pattern, class_names=class_names, data_dir=data_dir)
     adv_loader = DataLoader(adv_ds, batch_size=batch_size, shuffle=False, num_workers=2)
 
-    if model_name == "resnet18":
+    if model_name == "simplecnn":
+        model = SimpleCNN(num_classes=num_classes)
+    elif model_name == "resnet18":
         model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
     else:
         raise ValueError(f"Unsupported model_name: {model_name}")

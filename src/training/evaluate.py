@@ -6,6 +6,9 @@ import matplotlib.pyplot as plt
 from src.data.dataloader import get_dataloaders
 from torchvision import models
 import numpy as np
+from src.training.simple_cnn import SimpleCNN
+
+
 
 def evaluate_model(model_path, data_dir="data/raw", batch_size=32, model_name="resnet18", device=None):
     """
@@ -15,10 +18,10 @@ def evaluate_model(model_path, data_dir="data/raw", batch_size=32, model_name="r
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # === Load model ===
-    if model_name == "resnet18":
+    if model_name == "simplecnn":
+        model = SimpleCNN(num_classes=num_classes)
+    elif model_name == "resnet18":
         model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
-    elif model_name == "resnet50":
-        model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
     else:
         raise ValueError(f"Unsupported model: {model_name}")
     

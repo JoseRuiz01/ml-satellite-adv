@@ -65,8 +65,6 @@ def evaluate_pgd(model, dataloader, device, eps=0.005, alpha=None, iters=20,
                           targeted=False, target_class=None):
     """
     Run PGD attack on dataloader, evaluate and save adv examples.
-    - eps, alpha, iters are in normalized input space (same as model inputs).
-    - If alpha is None, use eps / iters.
     """
     model.eval()
     os.makedirs(out_dir, exist_ok=True)
@@ -93,7 +91,6 @@ def evaluate_pgd(model, dataloader, device, eps=0.005, alpha=None, iters=20,
         labels = labels.to(device)
         total += images.size(0)
 
-        # clean eval
         with torch.no_grad():
             out = model(images)
             loss = criterion(out, labels)
@@ -101,11 +98,9 @@ def evaluate_pgd(model, dataloader, device, eps=0.005, alpha=None, iters=20,
             clean_correct += (preds == labels).sum().item()
             clean_loss_total += loss.item() * images.size(0)
 
-        # determine target labels for targeted attack
         target_labels = None
         if targeted:
             if target_class is None:
-                # simple heuristic: target the second-most-likely class (could improve)
                 with torch.no_grad():
                     probs = torch.softmax(out, dim=1)
                     target_labels = probs.argsort(dim=1)[:,-2]  # second-best

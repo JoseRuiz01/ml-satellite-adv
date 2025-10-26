@@ -5,7 +5,9 @@ import torch.optim as optim
 from torchvision import models
 from tqdm import tqdm
 from src.data.dataloader import get_dataloaders
-
+from src.training.simple_cnn import SimpleCNN
+    
+    
 
 def train_one_epoch(model, dataloader, criterion, optimizer, device):
     model.train()
@@ -55,7 +57,7 @@ def train_model(
     batch_size=32,
     epochs=10,
     lr=1e-3,
-    model_name="resnet18",
+    model_name="simplecnn",
     output_dir="../experiments/checkpoints",
     device=None
 ):
@@ -72,7 +74,9 @@ def train_model(
     num_classes = len(class_names)
 
     # === Model ===
-    if model_name == "resnet18":
+    if model_name == "simplecnn":
+        model = SimpleCNN(num_classes=num_classes)
+    elif model_name == "resnet18":
         model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
         model.fc = nn.Linear(model.fc.in_features, num_classes)
     else:
