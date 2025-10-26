@@ -51,12 +51,12 @@ def evaluate(model, dataloader, criterion, device, desc="Validation"):
 
 
 def train_model(
-    data_dir="data/raw",
+    data_dir="../data/raw",
     batch_size=32,
     epochs=10,
     lr=1e-3,
     model_name="resnet18",
-    output_dir="experiments/checkpoints",
+    output_dir="../experiments/checkpoints",
     device=None
 ):
     """
