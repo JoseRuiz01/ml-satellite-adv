@@ -103,14 +103,13 @@ def evaluate_pgd(model, dataloader, device, eps=0.005, alpha=None, iters=20,
             if target_class is None:
                 with torch.no_grad():
                     probs = torch.softmax(out, dim=1)
-                    target_labels = probs.argsort(dim=1)[:,-2]  # second-best
+                    target_labels = probs.argsort(dim=1)[:,-2] 
             else:
                 target_labels = torch.full_like(labels, fill_value=int(target_class), device=device)
 
         adv_images = pgd_attack_batch(model, images, labels, eps=eps, alpha=alpha, iters=iters,
                                       device=device, targeted=targeted, target_labels=target_labels)
 
-        # eval adv
         with torch.no_grad():
             out_adv = model(adv_images)
             loss_adv = criterion(out_adv, labels)
@@ -118,7 +117,6 @@ def evaluate_pgd(model, dataloader, device, eps=0.005, alpha=None, iters=20,
             adv_correct += (preds_adv == labels).sum().item()
             adv_loss_total += loss_adv.item() * images.size(0)
 
-        # save some unnormalized images periodically
         if (batch_idx % save_every == 0) and (max_save is None or saved < max_save):
             adv_cpu = adv_images.cpu()
             preds_cpu = preds_adv.cpu()
