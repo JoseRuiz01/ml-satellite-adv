@@ -53,34 +53,54 @@ We split the dataset into train, validation, and test sets (default 70/15/15). D
 
 ---
 
+Here’s an updated and clear version of your **Training Pipeline** section that now includes both **ResNet18** and **SimpleCNN**:
+
+---
+
 ## 4. Training Pipeline
 
 ### 4.1 Model Setup
 
-The **ResNet18** model is initialized with pretrained weights. The final fully connected layer is replaced to match the number of classes in the EuroSAT dataset. The model is then moved to the computation device (CPU or GPU) for training.
+Two model architectures are supported in this project:
 
+* **ResNet18**: A deep convolutional neural network pretrained on ImageNet. The final fully connected layer is replaced to match the number of classes in the EuroSAT dataset. This model generally achieves high accuracy but requires more computation.
+
+* **SimpleCNN**: A lightweight custom convolutional network designed for faster training and experimentation. It consists of a few convolutional and fully connected layers, making it easier to train on limited hardware or smaller datasets while still capturing essential spatial patterns.
+
+Both models are automatically moved to the available computation device (CPU or GPU) for training.
+
+---
 
 ### 4.2 Loss and Optimizer
 
-The training uses the **cross-entropy loss** function, which is standard in classification projects. 
-The **Adam optimizer** is chosen for updating the model weights with a learning rate of 1e-4.
+The training process uses the **Cross-Entropy Loss**, which measures the difference between predicted and true class probabilities — a standard choice for multi-class classification tasks.
+The **Adam optimizer** is used for parameter updates, providing adaptive learning rates for stable convergence. The learning rate is set to **1e-4** by default but can be adjusted based on performance.
 
+---
 
 ### 4.3 Training Loop
 
-* For each epoch:
+For each training epoch:
 
-  * Forward pass on training set
-  * Compute loss and gradients
-  * Update weights
-  * Evaluate on validation set
-* Save the best model based on validation accuracy
+1. Perform a forward pass through the training data.
+2. Compute the loss and perform backpropagation to calculate gradients.
+3. Update the model weights using the optimizer.
+4. Evaluate the model on the validation dataset to track performance.
+5. Save the model checkpoint whenever the validation accuracy improves — ensuring that the best version of the model is preserved for testing and deployment.
 
 
 ### 4.4 Final Evaluation
 
 After training, the best model is loaded and evaluated on the test set to measure final accuracy.
 
+**SimpleCNN**
+* Test Accuracy: **66.00%**
+* Test Loss: **0.9615**
+* Precision: **0.6568**
+* Recall: **0.6555**
+* F1-score: **0.6521**
+
+**ResNet18**
 * Test Accuracy: **82.77%**
 * Test Loss: **0.6247**
 * Precision: **0.8240**
