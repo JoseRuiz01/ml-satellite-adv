@@ -84,13 +84,17 @@ def evaluate_pgd(model, dataloader, device, eps=0.005, alpha=None, iters=20,
     adv_loss_total = 0.0
     saved = 0
     batch_idx = 0
+    saved = 0
+    batch_idx = 0
+    global_ptr = 0
+
 
     for images, labels in tqdm(dataloader, desc=f"PGD eps={eps}", leave=False):
         batch_idx += 1
         images = images.to(device)
         labels = labels.to(device)
         total += images.size(0)
-
+        
         with torch.no_grad():
             out = model(images)
             loss = criterion(out, labels)
@@ -119,18 +123,32 @@ def evaluate_pgd(model, dataloader, device, eps=0.005, alpha=None, iters=20,
 
         if (batch_idx % save_every == 0) and (max_save is None or saved < max_save):
             adv_cpu = adv_images.cpu()
-            
-            for i in range(adv_cpu.size(0)):
+            batch_size_cur = adv_cpu.size(0)
+
+            for i in range(batch_size_cur):
                 if max_save is not None and saved >= max_save:
                     break
+
+                # compute global index for this sample
+                if hasattr(dataloader.dataset, "indices"):
+                    idx = dataloader.dataset.indices[global_ptr + i]
+                    orig_dataset = dataloader.dataset.dataset
+                else:
+                    idx = global_ptr + i
+                    orig_dataset = dataloader.dataset
+
+                # get original filename from dataset.samples
+                orig_name = orig_dataset.samples[idx][0]
+                base = os.path.splitext(os.path.basename(orig_name))[0]
+
                 img = adv_cpu[i]
                 img_unn = unnormalize(img.to(device), mean_t.to(device), std_t.to(device)).cpu()
                 img_unn = torch.clamp(img_unn, 0.0, 1.0)
-                orig_name = getattr(dataloader.dataset, "samples", [("sample", None)])[i][0]
-                base = os.path.splitext(os.path.basename(orig_name))[0]
                 fname = f"{base}_pgd.png"
                 save_image(img_unn, os.path.join(out_dir, fname))
                 saved += 1
+
+        global_ptr += images.size(0)
 
 
 
