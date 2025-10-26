@@ -42,7 +42,7 @@ class EuroSATDataset(Dataset):
         return img, label
 
 
-def compute_mean_std_rasterio(dataset, sample_size=None):
+def compute_mean_std(dataset, sample_size=None):
     """
     Calculate mean and std of EuroSATDataset
     """
@@ -72,7 +72,7 @@ def get_dataloaders(data_dir="data/raw", batch_size=32, val_split=0.15, test_spl
     DataLoader to load EuroSAT data
     """
     base_dataset = EuroSATDataset(data_dir, transform=transforms.ToTensor())
-    mean, std = compute_mean_std_rasterio(base_dataset, sample_size=2000)
+    mean, std = compute_mean_std(base_dataset, sample_size=2000)
     std[std == 0] = 1.0
     
     train_transform = transforms.Compose([
