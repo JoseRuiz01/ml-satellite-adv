@@ -1,3 +1,4 @@
+# src/attacks/evaluate.py
 import os
 import re
 import glob
@@ -11,21 +12,21 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 
+
 try:
-    from src.data.dataloader import EuroSATDataset, compute_mean_std_rasterio, get_dataloaders
+    from src.data.dataloader import EuroSATDataset, compute_mean_std, get_dataloaders
 except Exception:
     EuroSATDataset = None
-    compute_mean_std_rasterio = None
+    compute_mean_std = None
     get_dataloaders = None
 
 
 class AdvFolderDataset(Dataset):
     """
     Dataset for adversarial images saved as PNG/JPG with true label encoded in filename.
-    Expects filenames containing 'true{LABEL}' where LABEL is an integer class index.
     """
 
-    def __init__(self, folder, transform=None, pattern="*.png"):
+    def __init__(self, folder, transform=None, pattern="*.png", class_names=None, data_dir=None):
         self.folder = folder
         self.pattern = pattern
         self.transform = transform
@@ -33,37 +34,96 @@ class AdvFolderDataset(Dataset):
         if len(self.filepaths) == 0:
             raise FileNotFoundError(f"No images matching {pattern} found in {folder}")
 
-        self.labels = [self._parse_true_label(fp) for fp in self.filepaths]
+        # class_names may be provided (list of strings). If not, we will try to get them from data_dir.
+        self.class_names = class_names
+        if self.class_names is None and data_dir is not None and get_dataloaders is not None:
+            try:
+                _, _, _, self.class_names = get_dataloaders(data_dir=data_dir, batch_size=1)
+            except Exception:
+                # leave as None; numeric labels will still work
+                self.class_names = None
 
-    def _parse_true_label(self, filepath):
-        fname = os.path.basename(filepath)
-        m = re.search(r"true(\d+)", fname)
-        if not m:
-            raise ValueError(f"Could not parse true label from filename '{fname}'. Expected to find 'true{{idx}}'.")
-        return int(m.group(1))
+        # Defer parsing labels until we have class_names (so we can map names->indices)
+        self.labels_parsed = None  # will be filled by parse_labels(class_names) below
 
     def __len__(self):
         return len(self.filepaths)
 
+    def _parse_label_from_filename(self, fname):
+        """
+        Try to extract label info from filename.
+        Return either int (numeric index) or str (class name), or raise ValueError.
+        """
+        base = os.path.basename(fname)
+
+        # 1) look for numeric: 'true123' or '_true123_' or 'true-123'
+        m = re.search(r"true[_\-]?(\d+)", base, flags=re.IGNORECASE)
+        if m:
+            return int(m.group(1))
+
+        # 2) look for 'trueClassName' or 'true_ClassName' or 'true-ClassName' or 'true.ClassName'
+        # capture chunk after 'true' and before next separator (_,-,., or end)
+        m = re.search(r"true[_\-\.\s]?([A-Za-z0-9]+)", base, flags=re.IGNORECASE)
+        if m:
+            return m.group(1)
+
+        # 3) as fallback, look for pattern 'label{NAME}' or 'true-{NAME}'
+        m = re.search(r"(?:label|true)[_\-\.:]?([A-Za-z0-9]+)", base, flags=re.IGNORECASE)
+        if m:
+            return m.group(1)
+
+        raise ValueError(f"Could not parse true label from filename '{base}'. Expected 'true{{idx}}' or 'true{{ClassName}}'.")
+
+    def parse_labels(self):
+        """
+        Parse labels for all filepaths and return numeric indices.
+        If class_names is available, string labels will be mapped to indices.
+        """
+        labels = []
+        for fp in self.filepaths:
+            raw = self._parse_label_from_filename(fp)
+            if isinstance(raw, int):
+                labels.append(raw)
+            else:
+                # raw is a class name string
+                if self.class_names is not None:
+                    # try exact match; if not found, try case-insensitive match
+                    if raw in self.class_names:
+                        labels.append(self.class_names.index(raw))
+                    else:
+                        # case-insensitive try
+                        lowered = [c.lower() for c in self.class_names]
+                        try:
+                            labels.append(lowered.index(raw.lower()))
+                        except ValueError:
+                            raise ValueError(f"Parsed class name '{raw}' from file '{fp}' but it is not in known class_names.")
+                else:
+                    raise ValueError(f"Parsed class name '{raw}' from file '{fp}' but no class_names available to map it to an index.")
+        self.labels_parsed = labels
+        return labels
+
     def __getitem__(self, idx):
+        if self.labels_parsed is None:
+            self.parse_labels()
+
         p = self.filepaths[idx]
         img = Image.open(p).convert("RGB")
         if self.transform is not None:
             img = self.transform(img)
-        label = self.labels[idx]
+        label = self.labels_parsed[idx]
         return img, label
 
 
 def get_mean_std(data_dir, sample_size=2000, device="cpu"):
     """
     Use the project's dataloader helper to compute mean/std if available.
-    Returns (mean_list, std_list)
     """
-    if EuroSATDataset is None or compute_mean_std_rasterio is None:
+    if EuroSATDataset is None or compute_mean_std is None:
+        
         return [0.3443, 0.3803, 0.4082], [0.1573, 0.1309, 0.1198]
 
     base_ds = EuroSATDataset(data_dir, transform=transforms.ToTensor())
-    mean_t, std_t = compute_mean_std_rasterio(base_ds, sample_size=sample_size)
+    mean_t, std_t = compute_mean_std(base_ds, sample_size=sample_size)
 
     if torch.is_tensor(mean_t):
         mean = mean_t.tolist()
@@ -103,7 +163,14 @@ def evaluate_adv(
         transforms.Normalize(mean=mean, std=std)
     ])
 
-    adv_ds = AdvFolderDataset(adv_folder, transform=transform, pattern=image_pattern)
+    class_names = None
+    if data_dir is not None and get_dataloaders is not None:
+        try:
+            _, _, _, class_names = get_dataloaders(data_dir=data_dir, batch_size=1)
+        except Exception:
+            class_names = None
+
+    adv_ds = AdvFolderDataset(adv_folder, transform=transform, pattern=image_pattern, class_names=class_names, data_dir=data_dir)
     adv_loader = DataLoader(adv_ds, batch_size=batch_size, shuffle=False, num_workers=2)
 
     if model_name == "resnet18":
@@ -111,13 +178,8 @@ def evaluate_adv(
     else:
         raise ValueError(f"Unsupported model_name: {model_name}")
 
-    if get_dataloaders is not None and data_dir is not None:
-        try:
-            _, _, _, class_names = get_dataloaders(data_dir=data_dir, batch_size=1)
-        except Exception:
-            class_names = [str(i) for i in range(max(adv_ds.labels) + 1)]
-    else:
-        class_names = [str(i) for i in range(max(adv_ds.labels) + 1)]
+    if class_names is None:
+        class_names = [str(i) for i in range(max(adv_ds.parse_labels()) + 1)]
 
     num_classes = len(class_names)
     model.fc = nn.Linear(model.fc.in_features, num_classes)
