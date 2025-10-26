@@ -119,17 +119,20 @@ def evaluate_pgd(model, dataloader, device, eps=0.005, alpha=None, iters=20,
 
         if (batch_idx % save_every == 0) and (max_save is None or saved < max_save):
             adv_cpu = adv_images.cpu()
-            preds_cpu = preds_adv.cpu()
-            labels_cpu = labels.cpu()
+            
             for i in range(adv_cpu.size(0)):
                 if max_save is not None and saved >= max_save:
                     break
                 img = adv_cpu[i]
                 img_unn = unnormalize(img.to(device), mean_t.to(device), std_t.to(device)).cpu()
                 img_unn = torch.clamp(img_unn, 0.0, 1.0)
-                fname = f"pgd_eps{eps:.4f}_idx{saved:06d}_true{int(labels_cpu[i])}_pred{int(preds_cpu[i])}.png"
+                orig_name = getattr(dataloader.dataset, "samples", [("sample", None)])[i][0]
+                base = os.path.splitext(os.path.basename(orig_name))[0]
+                fname = f"{base}_pgd.png"
                 save_image(img_unn, os.path.join(out_dir, fname))
                 saved += 1
+
+
 
     metrics = {
         "clean_acc": clean_correct / total,
