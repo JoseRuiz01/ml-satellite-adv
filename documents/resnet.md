@@ -94,15 +94,15 @@ For each training epoch:
 After training, the best model is loaded and evaluated on the test set to measure final accuracy.
 
 **SimpleCNN**
-* Test Accuracy: **66.00%**
-* Test Loss: **0.9615**
-* Precision: **0.6568**
-* Recall: **0.6555**
-* F1-score: **0.6521**
+* Test Accuracy: **96.24%**
+* Test Loss: **0.1777**
+* Precision: **0.9623**
+* Recall: **0.9629**
+* F1-score: **0.9626**
 
-**ResNet18**
-* Test Accuracy: **82.77%**
-* Test Loss: **0.6247**
-* Precision: **0.8240**
-* Recall: **0.8252**
-* F1-score: **0.8234**
+**ResNet18** (Forest, Highway, SeaLake)
+* Test Accuracy: **99.14%**
+* Test Loss: **0.0220**
+* Precision: **0.9912**
+* Recall: **0.9917**
+* F1-score: **0.9914**
