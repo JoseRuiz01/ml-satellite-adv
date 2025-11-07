@@ -18,7 +18,6 @@ import tifffile
 from src.training.simple_cnn import SimpleCNN
 from src.attacks.utils import DEFAULT_MEAN, DEFAULT_STD
 from src.attacks.io import load_tif_image
-from src.attacks.pgd import evaluate_pgd
 
 try:
     from src.data.dataloader import EuroSATDataset, compute_mean_std, get_dataloaders
@@ -29,11 +28,11 @@ except Exception:
 
 
 # -------------------------
-#  Dataset for Adversarial Files
+#  Dataset for Raw Files
 # -------------------------
-class AdvFolderDataset(Dataset):
+class RawFolderDataset(Dataset):
     """
-    Dataset for adversarial .tif images with 'trueX_predY' encoded filenames.
+    Dataset for raw .tif images 
     """
 
     def __init__(self, folder, transform=None, pattern="*.tif", class_names=None, data_dir=None):
@@ -51,35 +50,19 @@ class AdvFolderDataset(Dataset):
             except Exception:
                 self.class_names = None
 
-        self.labels_parsed = None
 
     def __len__(self):
         return len(self.filepaths)
 
-    def _parse_label_from_filename(self, fname):
-        base = os.path.basename(fname)
-        m = re.search(r"true[_\-]?(\d+)", base, flags=re.IGNORECASE)
-        if m:
-            return int(m.group(1))
-        raise ValueError(f"Could not parse true label from filename '{base}'.")
-
-    def parse_labels(self):
-        labels = [self._parse_label_from_filename(fp) for fp in self.filepaths]
-        self.labels_parsed = labels
-        return labels
-
+    
     def __getitem__(self, idx):
-        if self.labels_parsed is None:
-            self.parse_labels()
-
         p = self.filepaths[idx]
         img = load_tif_image(p)
 
         if self.transform is not None:
             img = self.transform(img)
 
-        label = self.labels_parsed[idx]
-        return img, label
+        return img
 
 
 # -------------------------
@@ -98,9 +81,9 @@ def get_mean_std(data_dir, sample_size=2000, device="cpu"):
 
 
 # -------------------------
-#  Evaluate Adversarial Images
+#  Evaluate model
 # -------------------------
-def evaluate_adv(
+def evaluate_model(
     adv_folder,
     model_path,
     data_dir=None,
@@ -111,7 +94,7 @@ def evaluate_adv(
     image_pattern="*.tif"
 ):
     """
-    Evaluate a trained model on adversarial images saved in adv_folder.
+    Evaluate a trained model on images saved in raw_folder.
     Computes classification metrics and confusion matrix.
     """
     if device is None:
@@ -135,7 +118,7 @@ def evaluate_adv(
         except Exception:
             class_names = None
 
-    adv_ds = AdvFolderDataset(
+    adv_ds = RawFolderDataset(
         adv_folder,
         transform=transform,
         pattern=image_pattern,
