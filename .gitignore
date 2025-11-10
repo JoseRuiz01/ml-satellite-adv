@@ -1,3 +1,6 @@
 /data
 /experiments
 *.pyc
+matrix_resnet18_1.png
+heatmap_resnet18_1.png
+src/training/evaluate.py
