@@ -76,12 +76,14 @@ def get_dataloaders(data_dir="data/raw", batch_size=32, val_split=0.15, test_spl
     std[std == 0] = 1.0
     
     train_transform = transforms.Compose([
-        transforms.Resize((64,64)),
+        transforms.Resize((224,224)),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(),
         transforms.ToTensor(),
         transforms.Normalize(mean=mean, std=std)
     ])
     test_transform = transforms.Compose([
-        transforms.Resize((64,64)),
+        transforms.Resize((224,224)),
         transforms.ToTensor(),
         transforms.Normalize(mean=mean, std=std)
     ])

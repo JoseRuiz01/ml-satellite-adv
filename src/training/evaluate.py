@@ -4,7 +4,12 @@ import torch.nn as nn
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms, models
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import (
+    classification_report,
+    confusion_matrix,
+    precision_recall_fscore_support,
+)
+
 import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
@@ -77,7 +82,7 @@ def evaluate_model(
     model_path,
     data_dir="../data/raw",
     batch_size=64,
-    model_name="resnet18",
+    model_name="resnet50",
     device=None,
 ):
     """
@@ -101,6 +106,9 @@ def evaluate_model(
     elif model_name.lower() == "resnet18":
         model = models.resnet18(weights=None)
         model.fc = nn.Linear(model.fc.in_features, num_classes)
+    elif model_name.lower() == "resnet50":
+        model = models.resnet50(weights=None)
+        model.fc = nn.Linear(model.fc.in_features, num_classes)
     else:
         raise ValueError(f"Unsupported model: {model_name}")
 
@@ -112,7 +120,10 @@ def evaluate_model(
     # === Evaluate ===
     print("\n🧪 Evaluating model on test set...")
     test_loss, test_acc, y_true, y_pred = evaluate(model, test_loader, criterion, device, desc="Test")
-
+    prec, rec, f1, _ = precision_recall_fscore_support(
+        y_true, y_pred, average="macro", zero_division=0
+    )
+    
     # === Compute classification metrics ===
     report = classification_report(y_true, y_pred, target_names=class_names, digits=4, zero_division=0)
     cm = confusion_matrix(y_true, y_pred)
@@ -126,9 +137,13 @@ def evaluate_model(
     # === Plot confusion matrix ===
     plot_confusion_matrix(cm, class_names)
 
+
     return {
         "accuracy": test_acc,
         "loss": test_loss,
+        "precision": prec,
+        "recall": rec,
+        "f1": f1,
         "confusion_matrix": cm,
         "classification_report": report,
         "class_names": class_names,

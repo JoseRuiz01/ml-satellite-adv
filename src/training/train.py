@@ -91,7 +91,7 @@ def train_model(
     if model_name == "simplecnn":
         model = SimpleCNN(num_classes=num_classes)
     elif model_name == "resnet18":
-        model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT) 
+        model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1) 
         
         if freeze_backbone:
             for param in model.parameters():
