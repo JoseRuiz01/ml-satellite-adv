@@ -116,79 +116,90 @@ def _apply_gaussian_smooth_to_perturbation(pert: np.ndarray, sigma: float) -> np
 
 
 def pgd_attack_batch(
-    model: nn.Module,
-    images: torch.Tensor,
+   model: nn.Module,
+    images: torch.Tensor,  # Already normalized
     labels: torch.Tensor,
-    config: PGDConfig,
+    mean: torch.Tensor,    # Normalization mean
+    std: torch.Tensor,     # Normalization std
+    eps: float = 0.01,     # Epsilon in PIXEL SPACE (0-255)
+    alpha: float = None,
+    iters: int = 20,
     targeted: bool = False,
     target_labels: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
-    PGD with importance masking, smoothing and optional dithering.
-
-    Args:
-        model: model to attack
-        images: (B,C,H,W) normalized images (tensor)
-        labels: (B,) ground-truth labels (tensor)
-        config: PGDConfig instance
-        targeted: whether attack is targeted
-        target_labels: (B,) target labels if targeted
-
-    Returns:
-        adv_images: adversarial images tensor (B,C,H,W)
+    Fixed PGD attack that works in pixel space to avoid artifacts.
+    
+    Key fix: Convert to pixel space [0,1], attack there, then normalize back.
     """
-    device = config.device or images.device
-    images = images.clone().detach().to(device)
-    ori_images = images.clone().detach()
-    labels = labels.to(device)
-    adv_images = images.clone().detach()
-
-    eps = config.eps
-    alpha = config.alpha if config.alpha is not None else eps * config.small_step_fraction
-
+    device = images.device
+    mean = mean.to(device)
+    std = std.to(device)
+    
+    # 1. Unnormalize to pixel space [0, 1]
+    images_pixel = images * std + mean
+    images_pixel = torch.clamp(images_pixel, 0, 1)
+    
+    # 2. Convert epsilon to [0,1] space (from 0-255)
+    eps_01 = eps / 255.0
+    
+    if alpha is None:
+        alpha = eps_01 / 10
+    
+    # 3. Initialize adversarial images
+    ori_pixel = images_pixel.clone().detach()
+    adv_pixel = ori_pixel.clone().detach()
+    
     loss_fn = nn.CrossEntropyLoss()
-
-    for _ in range(config.iters):
-        adv_images.requires_grad_(True)
-
-        outputs = model(adv_images)
-        if targeted:
-            if target_labels is None:
-                raise ValueError("target_labels must be provided for targeted attack")
-            loss = loss_fn(outputs, target_labels.to(device))
-            grad = torch.autograd.grad(loss, adv_images)[0]
-            step = -grad
+    
+    for iteration in range(iters):
+        # Normalize for model input
+        adv_norm = (adv_pixel - mean) / std
+        adv_norm.requires_grad_(True)
+        
+        # Forward pass
+        outputs = model(adv_norm)
+        
+        # Compute loss
+        if targeted and target_labels is not None:
+            loss = -loss_fn(outputs, target_labels)
         else:
             loss = loss_fn(outputs, labels)
-            grad = torch.autograd.grad(loss, adv_images)[0]
-            step = grad
+        
+        # Backward pass
+        grad = torch.autograd.grad(loss, adv_norm)[0]
+        
+        # Convert gradient back to pixel space
+        grad_pixel = grad * std
+        
+        with torch.no_grad():
+            # Update in pixel space
+            adv_pixel = adv_pixel + alpha * grad_pixel.sign()
+            
+            # Project to epsilon ball in pixel space
+            perturbation = adv_pixel - ori_pixel
+            perturbation = torch.clamp(perturbation, -eps_01, eps_01)
+            
+            # Apply perturbation
+            adv_pixel = ori_pixel + perturbation
+            adv_pixel = torch.clamp(adv_pixel, 0, 1)
+    
+    # 4. Normalize back for return
+    adv_norm = (adv_pixel - mean) / std
+    return adv_norm.detach()
 
-        # importance mask
-        mask = build_importance_mask(grad, keep_fraction=config.grad_mask_fraction, blur_sigma=config.grad_blur_sigma)
-        step = step * mask
 
-        # normalize step per-sample to avoid variable magnitudes
-        step_mean = step.abs().mean(dim=(1, 2, 3), keepdim=True)
-        step_norm = step / (step_mean + 1e-10)
 
-        # take step
-        adv_images = adv_images + alpha * step_norm
-        delta = torch.clamp(adv_images - ori_images, min=-eps, max=eps)
-        adv_images = torch.clamp(ori_images + delta, min=ori_images.min().item() - 1.0, max=ori_images.max().item() + 1.0).detach()
-
-        # smoothing of perturbation in pixel-space (optional)
-        if config.smooth_perturb_sigma > 0:
-            with torch.no_grad():
-                pert = (adv_images - ori_images).cpu().numpy()  # B,C,H,W
-                pert = _apply_gaussian_smooth_to_perturbation(pert, sigma=config.smooth_perturb_sigma)
-                adv_images = torch.from_numpy(pert).to(device).float() + ori_images
-                delta = torch.clamp(adv_images - ori_images, min=-eps, max=eps)
-                adv_images = torch.clamp(ori_images + delta, min=ori_images.min().item() - 1.0, max=ori_images.max().item() + 1.0).detach()
-
-        # optional dithering
-        if config.random_dither:
-            with torch.no_grad():
-                noise = (torch.rand_like(adv_images) - 0.5) * (config.dither_scale * eps)
-                adv_images = torch.clamp(adv_images + noise, min=ori_images.min().item() - 1.0, max=ori_images.max().item() + 1.0).detach()
-
-    return adv_images.detach()
+def smooth_perturbation(perturbation: np.ndarray, sigma: float = 1.0) -> np.ndarray:
+    """
+    Smooth perturbation to reduce high-frequency artifacts.
+    """
+    if sigma <= 0:
+        return perturbation
+    
+    smoothed = perturbation.copy()
+    for i in range(perturbation.shape[0]):  # Batch
+        for j in range(perturbation.shape[1]):  # Channels
+            smoothed[i, j] = gaussian_filter(perturbation[i, j], sigma=sigma)
+    
+    return smoothed

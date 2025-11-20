@@ -85,13 +85,20 @@ class AdvFolderDataset(Dataset):
         p = self.filepaths[idx]
         img = tifffile.imread(p)
 
+        if img.ndim == 3:
+            if img.shape[2] in [3, 4, 13]:
+                pass
+            elif img.shape[0] in [3, 4, 13]:
+                img = np.transpose(img, (1, 2, 0))
+        
         if img.ndim == 2:
             img = np.stack([img] * 3, axis=-1)
-        elif img.ndim == 3:
-            if img.shape[0] >= 4:
-                img = np.transpose(img, (1, 2, 0))
-            if img.shape[2] >= 4:
-                img = img[..., [3, 2, 1]]
+        
+        if img.shape[2] >= 4:
+            img = img[..., [3, 2, 1]]
+        elif img.shape[2] == 3:
+            # Ya es RGB, no hacer nada (o hacer img[..., :3] si quieres ser explícito)
+            pass
 
         img = Image.fromarray(img.astype(np.uint8))
 
@@ -139,7 +146,7 @@ def evaluate_adv(
         mean, std = get_mean_std(data_dir, sample_size=mean_std_sample_size, device=device)
 
     transform = transforms.Compose([
-        transforms.Resize((64, 64)),
+        transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize(mean=mean, std=std)
     ])
