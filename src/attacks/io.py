@@ -14,49 +14,59 @@ except Exception:
 
 
 def save_adversarial_tif(
-    adv_img_tensor,      
+    adv_img_tensor: torch.Tensor,
     index_in_batch: int,
     orig_path: str,
-    mean_t,
-    std_t,
-    labels_cpu,
+    labels_cpu: np.ndarray,
     out_dir: str,
-    **kwargs
+    l_scale: float = 0.05,
+    ab_scale: float = 0.4,
+    smooth_sigma: float = 1.5,
 ):
     """
-    Fixed version that properly handles unnormalization.
+    Save adversarial image with minimal visual artifacts using LAB-based perturbation.
+    
+    Args:
+        adv_img_tensor: (B,C,H,W) tensor with adversarial images in normalized [0,1] range.
+        index_in_batch: index of the image in the batch to save.
+        orig_path: path to original raw image (used to preserve true colors).
+        labels_cpu: numpy array of true labels.
+        out_dir: folder to save images.
+        l_scale, ab_scale: LAB channel perturbation scaling.
+        smooth_sigma: Gaussian smoothing sigma for LAB delta.
     """
     os.makedirs(out_dir, exist_ok=True)
     
-    # Get single image
-    if hasattr(adv_img_tensor, "ndim") and adv_img_tensor.ndim == 4:
-        img = adv_img_tensor[index_in_batch]
-    else:
-        img = adv_img_tensor
+    # Extract adversarial image in [0,1]
+    adv_img = adv_img_tensor[index_in_batch].detach().cpu().numpy().transpose(1,2,0)
+    adv_img = np.clip(adv_img, 0.0, 1.0)
     
-    device = img.device if torch.is_tensor(img) else 'cpu'
+    # Load original raw image
+    raw = load_and_prepare(orig_path, size=adv_img.shape[:2], is_raw=True)
     
-    # Unnormalize: back to [0,1]
-    img_unn = img * std_t.to(device) + mean_t.to(device)
-    img_unn = torch.clamp(img_unn, 0, 1)
+    # Apply perceptual LAB perturbation
+    adv_recon = apply_lab_perturbation(
+        orig_rgb_raw=raw,
+        adv_rgb_scaled_01=adv_img,
+        l_scale=l_scale,
+        ab_scale=ab_scale,
+        smooth_sigma=smooth_sigma
+    )
     
-    # Convert to numpy (C, H, W)
-    img_np = img_unn.cpu().numpy()
+    # Convert to uint8 [0,255]
+    img_final = np.clip(adv_recon, 0, 1)  # Ensure no overshoot
+    img_final = (img_final * 255).astype(np.uint8)
     
-    # Convert to (H, W, C)
-    if img_np.ndim == 3:
-        img_np = np.transpose(img_np, (1, 2, 0))
-    
-    # Scale to [0, 255]
-    img_final = (img_np * 255).astype(np.uint8)
-    
-    # Save
+    # Build filename
     base = Path(orig_path).stem
-    fname_tif = f"{base}_true{int(labels_cpu[index_in_batch])}.tif"
+    true_label = int(labels_cpu[index_in_batch])
+    fname_tif = f"{base}_true{true_label}.tif"
     out_path = Path(out_dir) / fname_tif
     
-    tifffile.imwrite(str(out_path), img_final)
+    # Save
+    tifffile.imwrite(str(out_path), img_final, photometric='rgb')
     return str(out_path)
+
 
 def load_tif_image(path: str, normalize: bool = True) -> np.ndarray:
     """

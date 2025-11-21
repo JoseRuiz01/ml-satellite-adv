@@ -24,12 +24,7 @@ except Exception:
     compute_mean_std = None
     get_dataloaders = None
 
-
 class AdvFolderDataset(Dataset):
-    """
-    Dataset for adversarial images saved as TIF/PNG files with true label encoded in filename.
-    """
-
     def __init__(self, folder, transform=None, pattern="*.tif", class_names=None, data_dir=None):
         self.folder = folder
         self.pattern = pattern
@@ -108,10 +103,8 @@ class AdvFolderDataset(Dataset):
         return img, label, p
 
 
+
 def get_mean_std(data_dir, sample_size=2000, device="cpu"):
-    """
-    Compute or return precomputed dataset mean and std values.
-    """
     if EuroSATDataset is None or compute_mean_std is None:
         return [0.3443, 0.3803, 0.4082], [0.1573, 0.1309, 0.1198]
 
@@ -133,10 +126,6 @@ def evaluate_adv(
     mean_std_sample_size=2000,
     image_pattern="*.tif"
 ):
-    """
-    Evaluate a trained model on adversarial images in adv_folder and rename
-    each file to include both true and predicted labels.
-    """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -166,9 +155,7 @@ def evaluate_adv(
         class_names = [str(i) for i in range(max(adv_ds.parse_labels()) + 1)]
     num_classes = len(class_names)
 
-    if model_name == "simplecnn":
-        model = SimpleCNN(num_classes=num_classes)
-    elif model_name == "resnet18":
+    if model_name == "resnet18":
         model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
         model.fc = nn.Linear(model.fc.in_features, num_classes)
     elif model_name == "resnet50":
@@ -242,9 +229,7 @@ def evaluate_adv(
 
 
 def plot_confusion_matrix(cm, class_names, figsize=(10, 8), normalize=True):
-    """
-    Plot confusion matrix using Seaborn heatmap.
-    """
+
     if normalize:
         with np.errstate(all='ignore'):
             cm_norm = cm.astype('float')

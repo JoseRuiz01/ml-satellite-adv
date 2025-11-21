@@ -21,7 +21,7 @@ class PGDConfig:
     iters: int = 50
     small_step_fraction: float = 0.2
     grad_mask_fraction: float = 0.25
-    grad_blur_sigma: float = 1.0
+    grad_blur_sigma: float = 2.0
     smooth_perturb_sigma: float = 1.0
     random_dither: bool = True
     dither_scale: float = 0.5
@@ -33,14 +33,7 @@ def build_importance_mask(
     keep_fraction: float = 0.3,
     blur_sigma: float = 1.0,
 ) -> torch.Tensor:
-    """
-    Build a soft per-pixel importance mask from gradients.
-
-    Args:
-        grad: gradient tensor of shape (B, C, H, W)
-        keep_fraction: fraction of pixels to keep (highest magnitude)
-        blur_sigma: gaussian blur sigma applied to binary mask (optional)
-    """
+    
     with torch.no_grad():
         magnitude = grad.abs().mean(dim=1)  # (B, H, W)
         B, H, W = magnitude.shape
@@ -73,6 +66,59 @@ def build_importance_mask(
         mask = mask.unsqueeze(1).to(grad.device)  # (B,1,H,W)
         return mask
 
+import torch.nn.functional as F
+
+def apply_low_pass_filter(perturbation: torch.Tensor, cutoff_ratio: float = 0.8) -> torch.Tensor:
+    """Apply frequency domain low-pass filter to perturbation."""
+    B, C, H, W = perturbation.shape
+    filtered = torch.zeros_like(perturbation)
+    
+    for b in range(B):
+        for c in range(C):
+            # FFT
+            freq = torch.fft.fft2(perturbation[b, c])
+            freq_shifted = torch.fft.fftshift(freq)
+            
+            # Create circular mask
+            crow, ccol = H // 2, W // 2
+            radius = int(min(H, W) * cutoff_ratio / 2)
+            y, x = torch.meshgrid(torch.arange(H), torch.arange(W), indexing='ij')
+            mask = ((x - ccol)**2 + (y - crow)**2) <= radius**2
+            mask = mask.to(perturbation.device)
+            
+            # Apply mask and inverse FFT
+            freq_shifted = freq_shifted * mask
+            freq = torch.fft.ifftshift(freq_shifted)
+            filtered[b, c] = torch.fft.ifft2(freq).real
+    
+    return filtered
+
+
+def smooth_grad_torch(grad: torch.Tensor, kernel_size: int = 5, sigma: float = 1.0) -> torch.Tensor:
+    """
+    Smooth gradient maps by convolving with a Gaussian-like separable kernel.
+    grad: (B,C,H,W)
+    """
+    if sigma <= 0 or kernel_size <= 1:
+        return grad
+
+    # build 1D gaussian kernel
+    half = kernel_size // 2
+    coords = torch.arange(-half, half + 1, dtype=torch.float32, device=grad.device)
+    kernel1d = torch.exp(-(coords ** 2) / (2 * (sigma ** 2)))
+    kernel1d = kernel1d / kernel1d.sum()
+    # separable via outer-product -> 2D kernel
+    kernel2d = kernel1d[:, None] * kernel1d[None, :]
+    kernel2d = kernel2d.unsqueeze(0).unsqueeze(0)  # (1,1,kH,kW)
+
+    C = grad.shape[1]
+    # replicate kernel for group conv
+    kernel = kernel2d.repeat(C, 1, 1, 1)  # (C,1,kH,kW)
+    # pad and convolve (grouped conv)
+    padding = kernel_size // 2
+    grad_sm = F.conv2d(grad, kernel, groups=C, padding=padding)
+    return grad_sm
+
 
 def compute_gradient_step(
     model: nn.Module,
@@ -82,10 +128,7 @@ def compute_gradient_step(
     target_labels: Optional[torch.Tensor],
     loss_fn=nn.CrossEntropyLoss(),
 ) -> torch.Tensor:
-    """
-    Compute gradient with respect to inputs (no update) and return step direction.
-    If targeted=True the step is negative gradient (move toward target).
-    """
+   
     imgs = imgs.clone().detach().requires_grad_(True)
     outputs = model(imgs)
     if targeted:
@@ -101,10 +144,7 @@ def compute_gradient_step(
 
 
 def _apply_gaussian_smooth_to_perturbation(pert: np.ndarray, sigma: float) -> np.ndarray:
-    """
-    Apply gaussian smoothing to perturbation stored as numpy (B,C,H,W).
-    Fallback if scipy gaussian_filter is not available.
-    """
+
     if gaussian_filter is None or sigma <= 0:
         return pert
     out = pert.copy()
@@ -114,92 +154,92 @@ def _apply_gaussian_smooth_to_perturbation(pert: np.ndarray, sigma: float) -> np
             out[b, c] = gaussian_filter(pert[b, c], sigma=sigma)
     return out
 
+def compute_saliency_mask(images: torch.Tensor) -> torch.Tensor:
+    """Compute edge-based saliency to avoid perturbing edges."""
+    sobel_x = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], 
+                           dtype=torch.float32, device=images.device).view(1, 1, 3, 3)
+    sobel_y = sobel_x.transpose(2, 3)
+    
+    gray = images.mean(dim=1, keepdim=True)
+    edges_x = F.conv2d(gray, sobel_x, padding=1)
+    edges_y = F.conv2d(gray, sobel_y, padding=1)
+    edges = torch.sqrt(edges_x**2 + edges_y**2)
+    
+    # Invert: high values = non-edge regions (safe to perturb)
+    mask = 1.0 - torch.sigmoid(edges * 5)
+    return mask.repeat(1, images.shape[1], 1, 1)
+
 
 def pgd_attack_batch(
-   model: nn.Module,
-    images: torch.Tensor,  # Already normalized
+    model: nn.Module,
+    images: torch.Tensor,
     labels: torch.Tensor,
-    mean: torch.Tensor,    # Normalization mean
-    std: torch.Tensor,     # Normalization std
-    eps: float = 0.01,     # Epsilon in PIXEL SPACE (0-255)
-    alpha: float = None,
-    iters: int = 20,
+    config: PGDConfig,
     targeted: bool = False,
     target_labels: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
-    Fixed PGD attack that works in pixel space to avoid artifacts.
-    
-    Key fix: Convert to pixel space [0,1], attack there, then normalize back.
+    PGD attack que funciona correctamente en espacio normalizado.
     """
-    device = images.device
-    mean = mean.to(device)
-    std = std.to(device)
+    device = config.device or images.device
+    images = images.to(device)
+    labels = labels.to(device)
     
-    # 1. Unnormalize to pixel space [0, 1]
-    images_pixel = images * std + mean
-    images_pixel = torch.clamp(images_pixel, 0, 1)
+    # Clonar imágenes originales
+    ori_images = images.clone().detach()
     
-    # 2. Convert epsilon to [0,1] space (from 0-255)
-    eps_01 = eps / 255.0
+    # Iniciar desde las imágenes originales (sin ruido inicial)
+    adv_images = ori_images.clone().detach()
     
-    if alpha is None:
-        alpha = eps_01 / 10
-    
-    # 3. Initialize adversarial images
-    ori_pixel = images_pixel.clone().detach()
-    adv_pixel = ori_pixel.clone().detach()
+    # eps y alpha deben estar en escala [0,1]
+    eps = config.eps
+    alpha = config.alpha if config.alpha is not None else eps / 10
     
     loss_fn = nn.CrossEntropyLoss()
     
-    for iteration in range(iters):
-        # Normalize for model input
-        adv_norm = (adv_pixel - mean) / std
-        adv_norm.requires_grad_(True)
+    for iteration in range(config.iters):
+        adv_images.requires_grad_(True)
         
-        # Forward pass
-        outputs = model(adv_norm)
+        outputs = model(adv_images)
         
-        # Compute loss
+        def compute_perceptual_loss(original: torch.Tensor, adversarial: torch.Tensor) -> torch.Tensor:
+            """Compute perceptual difference using feature extraction."""
+            # Use early layers of your model as feature extractor
+            return F.mse_loss(original, adversarial)
+        
+        # In pgd_attack_batch, modify the loss:
         if targeted and target_labels is not None:
-            loss = -loss_fn(outputs, target_labels)
+            attack_loss = -loss_fn(outputs, target_labels.to(device))
         else:
-            loss = loss_fn(outputs, labels)
+            attack_loss = loss_fn(outputs, labels)
+
+        # Add perceptual penalty
+        perceptual_penalty = compute_perceptual_loss(ori_images, adv_images)
+        loss = attack_loss + 0.1 * perceptual_penalty  # Weight the penalty
         
-        # Backward pass
-        grad = torch.autograd.grad(loss, adv_norm)[0]
-        
-        # Convert gradient back to pixel space
-        grad_pixel = grad * std
-        
+        # Calcular gradiente
+        model.zero_grad()
+        loss.backward()
+        grad = adv_images.grad.data  # (B,C,H,W)
+
+        # Optionally smooth the gradient to reduce high-frequency color bands
+        if config.grad_blur_sigma and config.grad_blur_sigma > 0:
+            # choose kernel roughly = 6*sigma -> kernel_size odd
+            ks = max(3, int(6 * config.grad_blur_sigma) | 1)
+            grad = smooth_grad_torch(grad, kernel_size=ks, sigma=config.grad_blur_sigma)
+
+        # Update using sign of gradient
         with torch.no_grad():
-            # Update in pixel space
-            adv_pixel = adv_pixel + alpha * grad_pixel.sign()
+            adv_images = adv_images + alpha * grad.sign()
             
-            # Project to epsilon ball in pixel space
-            perturbation = adv_pixel - ori_pixel
-            perturbation = torch.clamp(perturbation, -eps_01, eps_01)
+            # Proyectar a la bola epsilon
+            perturbation = adv_images - ori_images
+            perturbation = apply_low_pass_filter(perturbation, cutoff_ratio=0.7)
+            saliency_mask = compute_saliency_mask(ori_images)
+            perturbation = perturbation * saliency_mask  # Apply before clamping
+            perturbation = torch.clamp(perturbation, -eps, eps)
+            adv_images = ori_images + perturbation
             
-            # Apply perturbation
-            adv_pixel = ori_pixel + perturbation
-            adv_pixel = torch.clamp(adv_pixel, 0, 1)
+            # NO hacer clamp adicional aquí, ya que estamos en espacio normalizado
     
-    # 4. Normalize back for return
-    adv_norm = (adv_pixel - mean) / std
-    return adv_norm.detach()
-
-
-
-def smooth_perturbation(perturbation: np.ndarray, sigma: float = 1.0) -> np.ndarray:
-    """
-    Smooth perturbation to reduce high-frequency artifacts.
-    """
-    if sigma <= 0:
-        return perturbation
-    
-    smoothed = perturbation.copy()
-    for i in range(perturbation.shape[0]):  # Batch
-        for j in range(perturbation.shape[1]):  # Channels
-            smoothed[i, j] = gaussian_filter(perturbation[i, j], sigma=sigma)
-    
-    return smoothed
+    return adv_images.detach()
