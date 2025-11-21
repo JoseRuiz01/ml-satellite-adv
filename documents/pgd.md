@@ -142,10 +142,10 @@ Firstly, we have to understand the main metrics of the attack:
 
 
 #### 6.1.1. **Experiment 1**
-eps: **1/255**      
-alpha: **eps/10**
-iters: **40**
-grad_blur_sigma=**1.0**
+- ε: 2/255
+- α: ε/10 
+- Iterations: 40
+- Gradient blur: 1.0
 
 * Num images: 100
 * Test Accuracy: **53.00%**
@@ -157,13 +157,12 @@ grad_blur_sigma=**1.0**
 
 
 #### 6.1.2. **Experiment 2**
-eps: **1/255**      
-alpha: **eps/10**
-iters: **40**
-grad_blur_sigma=**2.0** (*smoother*)
-Add low-pass filter to suppress high-frequency artifacts (reduce visible effects of the attack)
-Add perceptual loss guidance
-(perturbations are more imperceptible) 
+- ε: 2/255
+- α: ε/10 
+- Iterations: 40
+- Gradient blur: 2.0 (*smoother*)
+Add low-pass filter to suppress high-frequency artifacts 
+Add perceptual loss guidance to make perturbations more imperceptible
 
 * Num images: 100
 * Test Accuracy: **30.00%**
@@ -175,10 +174,10 @@ Add perceptual loss guidance
 
 
 #### 6.1.3. **Experiment 3**
-eps: **4/255**     (*greater perturbation*) 
-alpha: **eps/10**
-iters: **100**   (*more iterations to optimize*)
-grad_blur_sigma=**2.0** 
+- ε: 4/255 (*greater perturbation*) 
+- α: ε/10 
+- Iterations: 100 (*more iterations to optimize*)
+- Gradient blur: 2.0
 
 * Num images: 100
 * Test Accuracy: **30.00%**
@@ -190,13 +189,13 @@ grad_blur_sigma=**2.0**
 
 
 #### 6.1.4. **Experiment 4**
-eps: **4/255**     
-alpha: **eps/20**  (*smaller steps*) 
-iters: **100**   
-grad_blur_sigma=**2.0** 
+- ε: 4/255
+- α: ε/20 (*smaller steps*) 
+- Iterations: 100
+- Gradient blur: 2.0
 
 * Num images: 100
-* Test Accuracy: **53.00%**
+* Test Accuracy: **30.00%**
 * Test Loss: **5.5034**
 * Precision: **0.0974**
 * Recall: **0.2500**
